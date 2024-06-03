@@ -7,6 +7,7 @@ __all__ = ["umni_crl"]
 
 from itertools import product
 import logging
+logger = logging.getLogger(__name__)
 
 import numpy as np
 import numpy.typing as npt
@@ -15,9 +16,11 @@ from causaldag import partial_correlation_suffstat, partial_correlation_test
 
 import utils
 
-def setminus(lst1, lst2):
+
+def setminus(lst1: list, lst2: list) -> list:
     lst3 = [value for value in lst1 if value not in lst2]
     return lst3
+
 
 def umni_crl(
     x_samples: npt.NDArray[np.float_],
@@ -99,8 +102,8 @@ def _causal_order(
     atol_eigv: float,
 ) -> tuple[npt.NDArray[np.float_], npt.NDArray[np.int_]]:
     n, _, d, _ = rx_ij.shape
-    assert (n == d)
-    logging.info(f"Starting `_causal_order`.")
+    assert n == d
+    logger.debug(f"Starting `_causal_order`.")
 
     KAPPA_ARR = [-1, 1, 1, 1, 2, 3, 5, 9, 32]
     assert(n < len(KAPPA_ARR))
@@ -117,7 +120,7 @@ def _causal_order(
             cm_eigval: npt.NDArray[np.float_] = cm_eig.eigenvalues
             cm_eigvec: npt.NDArray[np.float_] = cm_eig.eigenvectors
             cm_rank = np.sum(cm_eigval > atol_eigv, dtype=np.int_)
-            logging.debug(f"Rank of vt column space: {cm_rank}")
+            logger.debug(f"Rank of vt column space: {cm_rank}")
             rw_colb = cm_eigvec[:, -cm_rank:]
 
             # if cm_rank > t + K: yada yada
@@ -130,7 +133,7 @@ def _causal_order(
             # TODO: Think on this
             cm_svs = np.linalg.svd(proj_h_null_dsx_w_colb, compute_uv=False)
             cm_rank = np.sum(cm_svs > atol_eigv, dtype=np.int_)
-            logging.debug(f"Rank of proj null etc etc: {cm_rank}")
+            logger.debug(f"Rank of proj null etc etc: {cm_rank}")
 
             if cm_rank == 1:
                 u, _, _ = np.linalg.svd(rw_colb @ rw_colb.T @ ht_nullb)
@@ -138,7 +141,7 @@ def _causal_order(
                 w_mat[:, t] = np.array(w)
                 break
 
-        assert not np.allclose(w_mat[:,t],0) 
+        assert np.any(w_mat[:,t] != 0)
 
     w_mat = utils.umn.divide_by_gcd_matrix(w_mat)
     
@@ -153,29 +156,24 @@ def _ancestors(
 ) -> tuple[npt.NDArray[np.bool_], npt.NDArray[np.float_], npt.NDArray[np.int_]]:
     n, _, d, _ = rx_ij.shape
     assert (n == d)
-    logging.info(f"Starting `_ancestors`.")
+    logger.debug(f"Starting `_ancestors`.")
 
     hat_g_s = np.zeros((n, n), dtype=np.bool_)
     h_mat_s = h_mat_c.copy()
     w_mat_s = w_mat_c.copy()
-
-    KAPPA_ARR = [-1, 1, 1, 1, 2, 3, 5, 9, 32]
-    assert(n < len(KAPPA_ARR))
-    kappa = KAPPA_ARR[n]
 
     for t in reversed(range(n)):
         for j in range(t + 1, n):
             if hat_g_s[t, j]: continue
             if_parent = True
             mtj = [i for i in range(j) if i != t and not hat_g_s[t, i]]
-            new_kappa = int((2 * n * kappa) ** (j - t))
 
-            max_entry_w_t = int(np.sum(np.abs(w_mat_s[:,t])))
-            max_entry_w_j = int(np.sum(np.abs(w_mat_s[:,j])))
+            max_entry_w_t = int(np.sum(np.abs(w_mat_s[:,j])))
+            max_entry_w_j = int(np.sum(np.abs(w_mat_s[:,t])))
 
             #for b, a in product(range(1, n * kappa + 1),utils.umn.generate_alternating_range(new_kappa,start_with_zero=True)):
             #for a, b in product(range(-new_kappa, new_kappa + 1), range(1, n * kappa + 1)):
-            for a, b in product(range(-max_entry_w_t,max_entry_w_t+1),range(1,max_entry_w_j+1)):
+            for (a, b) in product(range(-max_entry_w_t, max_entry_w_t + 1), range(1, max_entry_w_j + 1)):
                 w_new = a * w_mat_s[:, t] + b * w_mat_s[:, j]
                 r_w = sum(w_new[i] * w_new[j] * rx_ij[i, j, :, :] for i in range(n) for j in range(n))
 
@@ -183,6 +181,7 @@ def _ancestors(
                 cm_eigval: npt.NDArray[np.float_] = cm_eig.eigenvalues
                 cm_eigvec: npt.NDArray[np.float_] = cm_eig.eigenvectors
                 cm_rank = np.sum(cm_eigval > atol_eigv, dtype=np.int_)
+                # cm_rank = np.sum(cm_eigval > np.sum(w_new) * atol_eigv, dtype=np.int_)
                 rw_colb = cm_eigvec[:, -cm_rank:]
 
                 # if cm_rank > t + K: yada yada
@@ -195,6 +194,7 @@ def _ancestors(
                 # TODO: Think on this
                 cm_svs = np.linalg.svd(proj_h_null_dsx_w_colb, compute_uv=False)
                 cm_rank = np.sum(cm_svs > atol_eigv, dtype=np.int_)
+                # cm_rank = np.sum(cm_svs > np.sum(w_new) * atol_eigv, dtype=np.int_)
 
                 if cm_rank == 1:
                     u, _, _ = np.linalg.svd(rw_colb @ rw_colb.T @ h_mtj_nullb)
@@ -216,10 +216,10 @@ def _unmixing_cov(
     x_samples: npt.NDArray[np.float_],
     hat_enc_s: npt.NDArray[np.float_],
     hat_g_s: npt.NDArray[np.bool_],
-    w_mat_s: npt.NDArray[np.float_],
+    w_mat_s: npt.NDArray[np.int_],
     atol_ci_test: float,
 ) -> tuple[npt.NDArray[np.bool_], npt.NDArray[np.float_]]:
-    logging.info(f"Starting `_unmixing`.")
+    logger.debug(f"Starting `_unmixing`.")
 
     n1, _, d, _ = x_samples.shape
     n = n1 - 1
@@ -245,8 +245,7 @@ def _unmixing_cov(
             m_list = np.where(w_mat_s[:,t])[0]
             for m in m_list:
                 u_m = np.linalg.solve(hat_z_cov_all[m+1][an_t][:,an_t], -hat_z_cov_all[m+1][an_t][:,t])         
-                #print(u_m)
-                if np.linalg.norm(u_m - u_obs)/np.linalg.norm(u_obs) > 1e-1:
+                if np.linalg.norm(u_m - u_obs) > 1e-1 * np.linalg.norm(u_obs):
                     # ok we found an environment in which node pi_t is intervened
                     hat_enc_h[t,:] += u_m @ hat_enc_h[an_t][:]
                     break
@@ -271,7 +270,6 @@ def _unmixing_cov(
                 else:
                     hat_g_h[t,j] = True
                     # check the remaining edges
-                    #print(t,j)
                     hat_pa_j = list(np.where(hat_g_s[:,j])[0])
                     hat_pa_j_minus_t = setminus(hat_pa_j,[t])
 

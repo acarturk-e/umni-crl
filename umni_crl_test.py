@@ -1,7 +1,8 @@
 import datetime
-import os
 import logging
+import os
 import pickle
+import time
 from typing import Callable
 
 import numpy as np
@@ -9,7 +10,6 @@ import numpy.typing as npt
 
 from umni_crl import umni_crl
 import utils
-import time
 
 scm_type = "linear"
 
@@ -18,7 +18,7 @@ if scm_type == "linear":
 else:
     raise ValueError(f"{scm_type=} is not recognized!")
 
-ATOL_EIGV = 5e-2
+ATOL_EIGV = 5e-3
 ATOL_CI_TEST = 5e-2
 
 ATOL_EFF_NZ = 1e-1
@@ -29,16 +29,16 @@ d_mat_choice = "MN-uppertri"
 
 if __name__ == "__main__":
     nd_list = [
-        (4, 5), (4, 20)
+        (4, 4),
     ]
 
     fill_rate = 0.5
-    nsamples = 100_000
+    nsamples = 10_000
     nruns = 200
     np_rng = np.random.default_rng()
 
     # Score computation/estimation settings
-    estimate_score_fns = True
+    estimate_score_fns = False
     nsamples_for_se = nsamples
     enable_gaussian_score_est = True
 
@@ -85,20 +85,23 @@ if __name__ == "__main__":
         os.remove(log_file)
 
     log_formatter = logging.Formatter(
-        "%(asctime)s %(process)d %(levelname)s %(message)s"
+        '%(asctime)s - %(name)-12s - %(levelname)-8s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S',
     )
     log_file_h = logging.FileHandler(log_file)
     log_file_h.setFormatter(log_formatter)
     log_file_h.setLevel(logging.DEBUG)
     log_console_h = logging.StreamHandler()
     log_console_h.setFormatter(log_formatter)
-    log_console_h.setLevel(logging.WARNING)
-    log_root_l = logging.getLogger()
-    log_root_l.setLevel(logging.INFO)
-    log_root_l.addHandler(log_file_h)
-    log_root_l.addHandler(log_console_h)
+    log_console_h.setLevel(logging.INFO)
+    logger = logging.getLogger()
+    logger.setLevel(logging.DEBUG)
+    for h in logger.handlers:
+        logger.removeHandler(h)
+    logger.addHandler(log_file_h)
+    logger.addHandler(log_console_h)
 
-    logging.info(f"Logging to {log_file}")
+    logger.info(f"Logging to {log_file}")
 
     config = {
         "ATOL_EIGV": ATOL_EIGV,
@@ -158,11 +161,11 @@ if __name__ == "__main__":
     t0 = time.time()
 
     for nd_idx, (n, d) in enumerate(nd_list):
-        print(f"Starting {(n, d) = }")
+        logger.info(f"Starting {(n, d) = }")
 
         for run_idx in range(nruns):
             if run_idx % 10 == 10 - 1:
-                print(f"{(n, d) = }, {run_idx = }")
+                logger.info(f"{(n, d) = }, {run_idx = }")
 
             results_run = results[n, d][run_idx]
 
@@ -306,7 +309,7 @@ if __name__ == "__main__":
             #results_run["scm"] = scm
             results_run["decoder"] = decoder
             results_run["encoder"] = encoder
-            
+
             results_run["dwc"] = np.zeros((n, n))
             results_run["dws"] = np.zeros((n, n))
             results_run["hat_g_s"] = np.zeros((n, n), dtype=bool)
@@ -321,7 +324,7 @@ if __name__ == "__main__":
                 w_mat_c, hat_enc_c, w_mat_s, hat_enc_s, hat_g_s, hard_results = umni_crl(x_samples, dsx_samples, hard_intervention, hard_graph_postprocess, ATOL_EIGV, ATOL_CI_TEST)
 
             except Exception as err:
-                logging.error(f"Unexpected {err=}, masking entry out")
+                logger.error(f"Unexpected {err=}, masking entry out")
                 results_run["is_run_ok"] = False
                 continue
 
@@ -336,12 +339,14 @@ if __name__ == "__main__":
             # DAG targets: true DAG for hard int, transitive closure for soft int
             dag_gt_h = scm.adj_mat.astype(int)
             dag_gt_s = utils.dag.transitive_closure(dag_gt_h)
+            assert dag_gt_s is not None
             all_top_orders = utils.dag.find_all_top_order(dag_gt_h)
+            pi = all_top_orders[0]
             # need to check which order to compare.
-            distance_to_pi = 100
+            distance_to_pi = n * n
             for current_pi in all_top_orders:
                 # check if dwc is upper tri
-                dist = np.sum(np.tril(dwc[current_pi],-1))
+                dist = np.sum(np.tril(np.abs(dwc[current_pi]), -1))
                 if dist == 0:
                     distance_to_pi = dist
                     pi = current_pi
@@ -350,8 +355,7 @@ if __name__ == "__main__":
                     distance_to_pi = dist
                     pi = current_pi
                 else:
-                    continue 
-            
+                    continue
 
             pi_inv = np.arange(n)
             pi_inv[pi] = np.arange(n)
@@ -359,8 +363,8 @@ if __name__ == "__main__":
             dwc = dwc[pi]
             dws = dws[pi]
             hat_g_s = hat_g_s[pi_inv][:,pi_inv]
-            hat_enc_c = hat_enc_c[pi]
-            hat_enc_s = hat_enc_s[pi]
+            hat_enc_c = hat_enc_c[pi_inv]
+            hat_enc_s = hat_enc_s[pi_inv]
 
 
             results[n,d][run_idx]["dwc"] = dwc
@@ -368,20 +372,22 @@ if __name__ == "__main__":
             results[n,d][run_idx]["hat_g_s"] = hat_g_s
             results[n,d][run_idx]["dag_gt_s"] = dag_gt_s
 
-            print("Step 2: D . W_c")
-            print(dwc)
-            print("Step 2: H_c . G ")
-            print(np.round(hat_enc_c @ decoder, 4))
-            print("Step 3: D . W_s")
-            print(dws)
-            print("Step 3: H_s . G ")
-            print(np.round(hat_enc_s @ decoder, 4))
-            print("True transitive closure")
-            print(dag_gt_s)
-            print("Soft graph estimate")
-            print(hat_g_s.astype(int))
+            logger.debug(
+                "\nStep 2: D . W_c\n%s\n" +
+                "Step 2: H_c . G\n%s\n"
+                "Step 3: D . W_s\n%s\n" +
+                "Step 3: H_s . G \n%s\n" +
+                "True transitive closure\n%s\n" +
+                "Soft graph estimate\n%s",
+                dwc,
+                np.round(hat_enc_c @ decoder, 4),
+                dws,
+                np.round(hat_enc_s @ decoder, 4),
+                dag_gt_s,
+                hat_g_s.astype(int),
+            )
 
-            edge_cm_s = utils.dag.confusion_mat_graph(dag_gt_s,hat_g_s) 
+            edge_cm_s = utils.dag.confusion_mat_graph(dag_gt_s, hat_g_s)
 
             results[n, d][run_idx]["shd_s"]            = edge_cm_s[0][1] + edge_cm_s[1][0]
             results[n, d][run_idx]["edge_precision_s"] = (edge_cm_s[0][0] / (edge_cm_s[0][0] + edge_cm_s[0][1])) if (edge_cm_s[0][0] + edge_cm_s[0][1]) != 0 else 1.0
@@ -408,17 +414,18 @@ if __name__ == "__main__":
                 # permutation
                 hat_g_h = hat_g_h[pi_inv][:,pi_inv]
                 hat_enc_h = hat_enc_h[pi]
-                print("Step 4: H_h . G")
-                print(np.round(hat_enc_h @ decoder, 4)[pi])
-                print("True DAG")
-                print(dag_gt_h)
-                print("Hard graph estimate")
-                print(hat_g_h.astype(int))
+                logger.debug("\nStep 4: H_h . G\n%s\n" +
+                    "True DAG\n%s\n" +
+                    "Hard graph estimate\n%s",
+                    np.round(hat_enc_h @ decoder, 4)[pi],
+                    dag_gt_h,
+                    hat_g_h.astype(int),
+                )
 
                 results[n,d][run_idx]["dag_gt_h"] = dag_gt_h
                 results[n,d][run_idx]["hat_g_h"] = hat_g_h
 
-                edge_cm_h = utils.dag.confusion_mat_graph(dag_gt_h,hat_g_h) 
+                edge_cm_h = utils.dag.confusion_mat_graph(dag_gt_h,hat_g_h)
 
                 results[n, d][run_idx]["shd_h"]            = edge_cm_h[0][1] + edge_cm_h[1][0]
                 results[n, d][run_idx]["edge_precision_h"] = (edge_cm_h[0][0] / (edge_cm_h[0][0] + edge_cm_h[0][1])) if (edge_cm_h[0][0] + edge_cm_h[0][1]) != 0 else 1.0
@@ -431,12 +438,8 @@ if __name__ == "__main__":
                 results[n, d][run_idx]["norm_z_err_h"] = ((hat_z_samples_h - z_samples).__pow__(2).sum() ** (0.5)) / z_samples_norm
                 results[n, d][run_idx]["extra_nz_in_eff_h"] = np.sum((np.abs(eff_transform_h) >= ATOL_EFF_NZ) & ~np.eye(n, dtype=bool), dtype=int)
 
-            print(f"n, d, run idx: {n}, {d}, {run_idx}")    
-
-
     t1 = time.time() - t0
-    print(f"Algo finished in {t1} sec")
-
+    logger.info(f"Algo finished in {t1} sec")
 
     # Transpose the results dict to make it more functional
     res = {
@@ -447,12 +450,12 @@ if __name__ == "__main__":
         for (nd, results_run_list) in results.items()
     }
 
-    print("")
-    print(f"Results ({nruns=}, {nsamples_for_se=})")
-    print(f"    (n, d) pairs = {nd_list}, D choice = {d_mat_choice}")
-    print(f" hard int: {hard_intervention}")
-    print(f" alpha: {ATOL_CI_TEST}, eig th: {ATOL_EIGV} ")
-    print(f" noisy scores: {estimate_score_fns}")
+    logger.info("\n" +
+        f"Results ({nruns=}, {nsamples_for_se=})\n" +
+        f"    (n, d) pairs = {nd_list}, D choice = {d_mat_choice}\n" +
+        f" hard int: {hard_intervention}\n" +
+        f" alpha: {ATOL_CI_TEST}, eig th: {ATOL_EIGV} \n" +
+        f" noisy scores: {estimate_score_fns}")
 
     is_run_ok = np.array([res[n, d]["is_run_ok"] for (n, d) in nd_list])
     n_ok_runs = is_run_ok.sum(-1)
@@ -472,24 +475,24 @@ if __name__ == "__main__":
     dag_gt_h_all = np.array([res[n, d]["dag_gt_h"] for (n, d) in nd_list])
 
     nd_number = len(nd_list)
-    soft_mixing_mat_all = [ [np.eye(n,dtype=bool) | g.T for g in dag_gt_s_all[idx]] for idx in range(nd_number)] 
+    soft_mixing_mat_all = [[np.eye(nd_list[idx][0], dtype=bool) | g.T for g in dag_gt_s_all[idx]] for idx in range(nd_number)]
     soft_mixing_mat_all = np.asarray(soft_mixing_mat_all)
 
-    n_zeros_in_soft_mixing_mat = [np.sum(soft_mixing_mat_all[idx]==0)/n_ok_runs[idx]  for idx in range(nd_number)]
+    n_zeros_in_soft_mixing_mat = [np.sum(soft_mixing_mat_all[idx] == 0) / n_ok_runs[idx]  for idx in range(nd_number)]
 
 
     incorrect_mixing_soft = extra_nz_in_eff_s.sum(-1) / n_ok_runs
 
-
-    print(f"    Ratio of failed runs = {1.0 - n_ok_runs / nruns}")
-    print(f"Up to ancestors")
-    print(f"    Structural Hamming dist = {np.around(shd_s.sum(-1) / n_ok_runs, 3)}")
-    print(f"    Edge precision          = {np.around(edge_precision_s.sum(-1) / n_ok_runs, 3)}")
-    print(f"    Edge recall             = {np.around(edge_recall_s.sum(-1) / n_ok_runs, 3)}")
-    print(f"    Normalized Z error      = {np.around(norm_z_err_s.sum(-1) / n_ok_runs, 3)}")
-    print(f"    # of incorrect mixing   = {np.around(extra_nz_in_eff_s.sum(-1) / n_ok_runs, 3)}")
-    print(f"    Ratio incorrect mixing  = {np.around(incorrect_mixing_soft /n_zeros_in_soft_mixing_mat,3)}")
-    print(f"    Dist to causal order    = {np.around(dist_to_causal_order.sum(-1) / n_ok_runs, 3)}")
+    logger.info(
+        f"    Ratio of failed runs = {1.0 - n_ok_runs / nruns}\n" +
+        f"Up to ancestors\n" +
+        f"    Structural Hamming dist = {np.around(shd_s.sum(-1) / n_ok_runs, 3)}\n" +
+        f"    Edge precision          = {np.around(edge_precision_s.sum(-1) / n_ok_runs, 3)}\n" +
+        f"    Edge recall             = {np.around(edge_recall_s.sum(-1) / n_ok_runs, 3)}\n" +
+        f"    Normalized Z error      = {np.around(norm_z_err_s.sum(-1) / n_ok_runs, 3)}\n" +
+        f"    # of incorrect mixing   = {np.around(extra_nz_in_eff_s.sum(-1) / n_ok_runs, 3)}\n" +
+        f"    Ratio incorrect mixing  = {np.around(incorrect_mixing_soft /n_zeros_in_soft_mixing_mat,3)}\n" +
+        f"    Dist to causal order    = {np.around(dist_to_causal_order.sum(-1) / n_ok_runs, 3)}")
 
     if hard_intervention:
         shd_h = np.array([res[n, d]["shd_h"] for (n, d) in nd_list])
@@ -498,14 +501,14 @@ if __name__ == "__main__":
         norm_z_err_h = np.array([res[n, d]["norm_z_err_h"] for (n, d) in nd_list])
         extra_nz_in_eff_h = np.array([res[n, d]["extra_nz_in_eff_h"] for (n, d) in nd_list])
 
-        n_zeros_in_hard_mixing_mat = [n**2 - n for idx in range(nd_number)]
+        n_zeros_in_hard_mixing_mat = [n**2 - n for (n, d) in nd_list]
         incorrect_mixing_hard = extra_nz_in_eff_h.sum(-1) / n_ok_runs
 
-
-        print(f"Unmixing")
-        print(f"    Structural Hamming dist = {np.around(shd_h.sum(-1) / n_ok_runs, 3)}")
-        print(f"    Edge precision          = {np.around(edge_precision_h.sum(-1) / n_ok_runs, 3)}")
-        print(f"    Edge recall             = {np.around(edge_recall_h.sum(-1) / n_ok_runs, 3)}")
-        print(f"    Normalized Z error      = {np.around(norm_z_err_h.sum(-1) / n_ok_runs, 3)}")
-        print(f"    # of incorrect mixing   = {np.around(extra_nz_in_eff_h.sum(-1) / n_ok_runs, 3)}")
-        print(f"    Ratio incorrect mixing  = {np.around(incorrect_mixing_hard /n_zeros_in_hard_mixing_mat,3)}")
+        logger.info(
+            f"Unmixing\n" +
+            f"    Structural Hamming dist = {np.around(shd_h.sum(-1) / n_ok_runs, 3)}\n" +
+            f"    Edge precision          = {np.around(edge_precision_h.sum(-1) / n_ok_runs, 3)}\n" +
+            f"    Edge recall             = {np.around(edge_recall_h.sum(-1) / n_ok_runs, 3)}\n" +
+            f"    Normalized Z error      = {np.around(norm_z_err_h.sum(-1) / n_ok_runs, 3)}\n" +
+            f"    # of incorrect mixing   = {np.around(extra_nz_in_eff_h.sum(-1) / n_ok_runs, 3)}\n" +
+            f"    Ratio incorrect mixing  = {np.around(incorrect_mixing_hard /n_zeros_in_hard_mixing_mat,3)}")
