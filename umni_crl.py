@@ -144,7 +144,7 @@ def _causal_order(
         assert np.any(w_mat[:,t] != 0)
 
     w_mat = utils.umn.divide_by_gcd_matrix(w_mat)
-    
+
     return h_mat, w_mat
 
 
@@ -233,47 +233,43 @@ def _unmixing_cov(
         if len(an_t) == 0:
             # t has no ancestors, already identified
             continue
-        else:       
+        else:
             hat_z_cov_all = hat_enc_h @ x_cov @ hat_enc_h.T
-
-            if np.linalg.det(hat_z_cov_all[0][an_t][:,an_t]) < 1e-2:
-                u_obs = np.zeros_like(hat_z_cov_all[0][an_t][:,t])
-            else:
-                u_obs = np.linalg.solve(hat_z_cov_all[0][an_t][:,an_t], -hat_z_cov_all[0][an_t][:,t])                
-
+            u_obs = np.linalg.solve(hat_z_cov_all[0][an_t][:,an_t], -hat_z_cov_all[0][an_t][:,t])
             # candidate environments
             m_list = np.where(w_mat_s[:,t])[0]
+            ### TODO: Pick the m with largest difference -- gonna be easier I think
             for m in m_list:
-                u_m = np.linalg.solve(hat_z_cov_all[m+1][an_t][:,an_t], -hat_z_cov_all[m+1][an_t][:,t])         
-                if np.linalg.norm(u_m - u_obs) > 1e-1 * np.linalg.norm(u_obs):
+                u_m = np.linalg.solve(hat_z_cov_all[m+1][an_t][:,an_t], -hat_z_cov_all[m+1][an_t][:,t])
+                if np.linalg.norm(u_m - u_obs) > 1e-1:
                     # ok we found an environment in which node pi_t is intervened
                     hat_enc_h[t,:] += u_m @ hat_enc_h[an_t][:]
                     break
 
-        ### GRAPH UPDATE
-        hat_z_obs_samples = np.squeeze(hat_enc_h @ x_samples[0])
-        suffstat = partial_correlation_suffstat(hat_z_obs_samples)
-        hat_g_h = np.empty((n, n), dtype=bool)        
-        # start by leveraging the soft graph
-        # transitive reduction is already done
-        hat_g_tr = utils.dag.transitive_reduction(hat_g_s)
-        #hat_g_h[np.where(hat_g_tr)] = True
+    ### GRAPH UPDATE
+    hat_z_obs_samples = np.squeeze(hat_enc_h @ x_samples[0])
+    suffstat = partial_correlation_suffstat(hat_z_obs_samples)
+    hat_g_h = np.empty((n, n), dtype=bool)
+    # start by leveraging the soft graph
+    # transitive reduction is already done
+    hat_g_tr = utils.dag.transitive_reduction(hat_g_s)
+    #hat_g_h[np.where(hat_g_tr)] = True
 
-        for t in range(n):
-            for j in range(n):
-                # if hat_g_tr[t,j] == True:
-                #     hat_g_h[t,j] = True
-                # elif hat_g_s[t,j] == False:
-                #     hat_g_h[t,j] = False
-                if hat_g_s[t,j] == False:
-                    hat_g_h[t,j] = False
-                else:
-                    hat_g_h[t,j] = True
-                    # check the remaining edges
-                    hat_pa_j = list(np.where(hat_g_s[:,j])[0])
-                    hat_pa_j_minus_t = setminus(hat_pa_j,[t])
+    for t in range(n):
+        for j in range(n):
+            # if hat_g_tr[t,j] == True:
+            #     hat_g_h[t,j] = True
+            # elif hat_g_s[t,j] == False:
+            #     hat_g_h[t,j] = False
+            if hat_g_s[t,j] == False:
+                hat_g_h[t,j] = False
+            else:
+                hat_g_h[t,j] = True
+                # check the remaining edges
+                hat_pa_j = list(np.where(hat_g_s[:,j])[0])
+                hat_pa_j_minus_t = setminus(hat_pa_j,[t])
 
-                    if partial_correlation_test(suffstat,t,j,hat_pa_j_minus_t)['p_value'] > atol_ci_test:
-                        hat_g_h[t, j] = False
+                if partial_correlation_test(suffstat,t,j,hat_pa_j_minus_t)['p_value'] > atol_ci_test:
+                    hat_g_h[t, j] = False
 
     return hat_g_h, hat_enc_h

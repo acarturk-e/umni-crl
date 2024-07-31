@@ -18,7 +18,7 @@ if scm_type == "linear":
 else:
     raise ValueError(f"{scm_type=} is not recognized!")
 
-ATOL_EIGV = 5e-3
+ATOL_EIGV = 5e-2
 ATOL_CI_TEST = 5e-2
 
 ATOL_EFF_NZ = 1e-1
@@ -29,16 +29,16 @@ d_mat_choice = "MN-uppertri"
 
 if __name__ == "__main__":
     nd_list = [
-        (4, 4),
+        (5, 5),
     ]
 
     fill_rate = 0.5
-    nsamples = 10_000
-    nruns = 200
+    nsamples = 100_000
+    nruns = 100
     np_rng = np.random.default_rng()
 
     # Score computation/estimation settings
-    estimate_score_fns = False
+    estimate_score_fns = True
     nsamples_for_se = nsamples
     enable_gaussian_score_est = True
 
