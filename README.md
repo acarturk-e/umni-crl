@@ -1,5 +1,7 @@
 # Sample complexity of interventional causal representation learning -- Experiment codes
 
+### **UPDATE 12/07/2024**: Please refer to the most recent version at https://github.com/acarturk-e/score-based-crl
+
 Note: Requires "causaldag" package (https://github.com/uhlerlab/causaldag)
 
 To reproduce the experiments presented in Section 5, run file `umni_crl_test.py`.
