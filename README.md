@@ -1,6 +1,8 @@
-# Sample complexity of interventional causal representation learning -- Experiment codes
+ ## Linear Causal Representation Learning from Unknown Multi-node Interventions (UMNI-CRL)
 
-### **UPDATE 12/07/2024**: Please refer to the most recent version at https://github.com/acarturk-e/score-based-crl
+NeurIPS 2024 paper: [Linear Causal Representation Learning from Unknown Multi-node Interventions](https://openreview.net/forum?id=weemASPtzg)
+
+### **UPDATE 12/07/2024**: Please refer to the most recent version of the code at https://github.com/acarturk-e/score-based-crl
 
 Note: Requires "causaldag" package (https://github.com/uhlerlab/causaldag)
 
